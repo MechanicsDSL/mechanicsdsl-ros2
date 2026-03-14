@@ -1,0 +1,21 @@
+# pendulum_params.yaml
+# ---------------------
+# Default parameters for the MechanicsDSL pendulum node.
+# Load with: ros2 launch mechanicsdsl_pendulum pendulum_params.launch.py
+# Or pass directly: ros2 run mechanicsdsl_pendulum pendulum_node --ros-args --params-file pendulum_params.yaml
+
+/pendulum:
+  ros__parameters:
+    # Physical parameters (MechanicsDSL \parameter blocks)
+    m_kg: 1.0          # Pendulum bob mass [kg]
+    l_m: 0.25          # Rod length [m]
+    g_mps2: 9.81       # Gravitational acceleration [m/s^2]
+
+    # Initial conditions
+    theta0_rad: 0.30   # Initial angle from vertical [rad]
+
+    # Integrator settings
+    dt_s: 0.004        # Integration timestep = 250 Hz
+
+    # Noether energy monitor
+    drift_tol: 0.0001  # |ΔE/E0| threshold for WARN
