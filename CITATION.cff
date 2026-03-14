@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite:"
+type: software
+title: "MechanicsDSL ROS2"
+abstract: >
+  ROS2 integration for MechanicsDSL. Compiles physical systems defined in
+  DSL notation directly to complete ROS2 packages with auto-generated
+  CMakeLists.txt, message definitions, topic architecture, and launch files.
+authors:
+  - family-names: Parsons
+    given-names: Noah
+    orcid: "https://orcid.org/0009-0000-7224-6040"
+    affiliation: "American Forge Institute & Eastern Wyoming College"
+repository-code: "https://github.com/MechanicsDSL/mechanicsdsl-ros2"
+license: MIT
+date-released: "2026-03-13"
+keywords:
+  - ROS2
+  - robotics
+  - physics simulation
+  - domain-specific language
+  - compiler
+references:
+  - type: software
+    title: "MechanicsDSL"
+    doi: "10.5281/zenodo.17771040"
+    authors:
+      - family-names: Parsons
+        given-names: Noah
