@@ -5,12 +5,12 @@
 <h1 align="center">mechanicsdsl-ros2</h1>
 
 <p align="center">
-  <em>Compile physical systems directly to ROS2 node packages.</em>
+  <em>Compile MechanicsDSL physical systems directly to complete ROS2 packages.</em>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-planned-lightgrey" alt="Status: Planned">
-  <img src="https://img.shields.io/badge/ROS2-Humble%20%7C%20Iron%20%7C%20Jazzy-blue" alt="ROS2 Versions">
+  <img src="https://img.shields.io/badge/status-active-green" alt="Active">
+  <img src="https://img.shields.io/badge/ROS2-Humble%20%7C%20Iron%20%7C%20Jazzy-blue" alt="ROS2">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
   <a href="https://github.com/MechanicsDSL/mechanicsdsl"><img src="https://img.shields.io/badge/core-mechanicsdsl-blue" alt="Core Package"></a>
 </p>
@@ -19,67 +19,118 @@
 
 ## Overview
 
-`mechanicsdsl-ros2` provides a dedicated integration layer between the MechanicsDSL compiler and the Robot Operating System (ROS2). Define manipulator dynamics, mobile robot kinematics, or any constrained mechanical system in DSL notation — the compiler generates a complete, buildable ROS2 package with auto-generated `CMakeLists.txt`, message definitions, topic publishers, and launch files.
+`mechanicsdsl-ros2` provides a dedicated ROS2 integration layer for MechanicsDSL. Physical systems defined in DSL notation compile to complete, buildable ROS2 packages — no manual C++ required for the physics layer.
 
 ---
 
-## Planned Capabilities
+## Package: `mechanicsdsl_pendulum`
 
-### Package Generation
-- **Complete ROS2 packages** — Auto-generated `package.xml`, `CMakeLists.txt`, node source, and launch files from a single DSL specification
-- **Message definitions** — Custom `.msg` files for generalized coordinates, velocities, constraint forces, and conservation law monitoring
-- **Topic architecture** — State publisher, reference subscriber, and diagnostics publisher nodes with configurable QoS profiles
-- **Real-time support** — `rclcpp` real-time executor compatibility; priority scheduling configuration for control loops
+The first generated package, currently including:
 
-### Supported Use Cases
-- **Manipulator dynamics** — Forward and inverse dynamics nodes for serial-chain and parallel robot arms
-- **Mobile robot kinematics** — Differential drive, omnidirectional, and legged locomotion models
-- **Constraint-aware control** — Holonomic and non-holonomic constraint forces published as wrench topics
-- **State estimation** — Sensor fusion nodes combining DSL-derived dynamics with IMU and encoder measurements
+### Nodes
 
-### Example Packages
-- 2-DOF planar manipulator with real-time torque feedforward control
-- Differential drive mobile robot with constraint-enforced no-slip kinematics
-- Pendulum-on-cart system with LQR stabilization
-- Coupled oscillator state estimation from noisy sensor topics
+| Node | System | Rate | Topics |
+|------|--------|------|--------|
+| `pendulum_node` | Simple pendulum | 250 Hz | `/mechanicsdsl/pendulum/state`, `/mechanicsdsl/pendulum/energy` |
+| `double_pendulum_node` | Double pendulum | 200 Hz | `/double_pendulum/state` |
 
-### Tooling
-- `mechanicsdsl-ros2 generate <dsl_file>` — CLI to scaffold a complete ROS2 package
-- `mechanicsdsl-ros2 verify <package_dir>` — Validate generated package builds cleanly against target ROS2 distro
-- Docker image with ROS2 Jazzy + MechanicsDSL pre-installed for zero-setup development
+### Messages
 
----
+| Message | Fields |
+|---------|--------|
+| `PendulumState` | `header`, `theta`, `omega`, `energy`, `energy_drift`, `sim_time` |
+| `SystemState` | `header`, `q[]`, `q_dot[]`, `q_ddot[]`, `lambda[]`, `energy`, `energy_drift`, `conserved_quantities[]`, `sim_time` |
 
-## Relationship to Core Package
-
-This repository provides ROS2-specific scaffolding and examples. The symbolic engine and C++ code generation live in [mechanicsdsl](https://github.com/MechanicsDSL/mechanicsdsl):
+### Launch Files
 
 ```bash
-pip install mechanicsdsl-core
+ros2 launch mechanicsdsl_pendulum pendulum.launch.py
+ros2 launch mechanicsdsl_pendulum pendulum.launch.py l_m:=0.5 theta0_rad:=0.8
+ros2 launch mechanicsdsl_pendulum double_pendulum.launch.py theta1_0:=0.3 theta2_0:=0.2
 ```
 
-The generated C++ is compatible with any ROS2 Humble, Iron, or Jazzy installation with no additional Python dependencies at runtime.
+---
+
+## Repository Structure
+
+```
+mechanicsdsl-ros2/
+├── mechanicsdsl_pendulum/
+│   ├── package.xml, CMakeLists.txt
+│   ├── msg/  PendulumState.msg, SystemState.msg
+│   ├── src/  pendulum_node.cpp, double_pendulum_node.cpp
+│   ├── include/mechanicsdsl_pendulum/  pendulum_dynamics.hpp
+│   ├── launch/  pendulum.launch.py, double_pendulum.launch.py
+│   ├── config/  pendulum_params.yaml
+│   └── test/  test_pendulum_eom.cpp, test_pendulum_integration.py
+├── docker/  Dockerfile (ROS2 Jazzy + MechanicsDSL)
+├── scripts/  build.sh, monitor.sh
+└── docs/  getting_started.md, architecture.md, adding_systems.md
+```
 
 ---
 
-## Status
+## Quick Start
 
-This repository is in the planning stage. The core package already generates ROS2-compatible C++; this repository will formalize the package scaffolding, CLI tooling, and worked examples. Watch this repository for updates.
+```bash
+# Clone into ROS2 workspace
+mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
+git clone https://github.com/MechanicsDSL/mechanicsdsl-ros2.git
+
+# Build
+cd ~/ros2_ws
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --packages-select mechanicsdsl_pendulum
+source install/setup.bash
+
+# Run
+ros2 launch mechanicsdsl_pendulum pendulum.launch.py
+```
+
+**Docker:**
+
+```bash
+docker build -t mechanicsdsl-ros2:jazzy docker/
+docker run --rm -it mechanicsdsl-ros2:jazzy
+```
 
 ---
+
+## Monitoring
+
+```bash
+ros2 topic echo /mechanicsdsl/pendulum/state
+ros2 topic hz  /mechanicsdsl/pendulum/state   # should be ~250 Hz
+
+# Reset
+ros2 topic pub --once /pendulum/reset std_msgs/msg/Bool "data: true"
+```
+
+---
+
+## Testing
+
+```bash
+colcon test --packages-select mechanicsdsl_pendulum
+colcon test-result --verbose
+```
+
+GTests cover EOM correctness, energy conservation, equilibrium stability, and small-angle period accuracy.
+
+---
+
+## Architecture
+
+See [docs/architecture.md](docs/architecture.md) for the full node/message/layer diagram.
+
+## Adding New Systems
+
+See [docs/adding_systems.md](docs/adding_systems.md).
 
 ## Contributing
 
-Contributions welcome — particularly ROS2 integration examples and real hardware validation. See [CONTRIBUTING.md](https://github.com/MechanicsDSL/mechanicsdsl/blob/main/CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-<p align="center">
-  <a href="https://github.com/MechanicsDSL/mechanicsdsl">Core Package</a> ·
-  <a href="https://mechanicsdsl.readthedocs.io">Documentation</a> ·
-  <a href="https://doi.org/10.5281/zenodo.17771040">Zenodo DOI</a>
-</p>
+MIT License — see [LICENSE](LICENSE).
