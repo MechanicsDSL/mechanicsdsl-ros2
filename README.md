@@ -17,7 +17,7 @@
 
 ## Overview
 
-`mechanicsdsl-ros2` provides a dedicated ROS2 integration layer for MechanicsDSL. Physical systems defined in DSL notation compile to complete, buildable ROS2 packages — no manual C++ required for the physics layer.
+`mechanicsdsl-ros2` provides a dedicated ROS2 integration layer for MechanicsDSL. Physical systems defined in DSL notation compile to complete, buildable ROS2 packages, no manual C++ required for the physics layer.
 
 ---
 
@@ -131,4 +131,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+MIT License; see [LICENSE](LICENSE).
