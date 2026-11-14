@@ -61,9 +61,12 @@ set -u
 smoke() {  # smoke <package> <executable> <system> <param>
   local pkg="$1" exe="$2" sys="$3" param="$4" pid
   echo "::group::smoke $pkg"
-  ros2 run "$pkg" "$exe" >"/tmp/$pkg.log" 2>&1 &
+  # Own process group: `ros2 run` spawns the node as a child, and killing only
+  # the wrapper can leave a same-named node alive to answer the next smoke's
+  # parameter calls.
+  setsid ros2 run "$pkg" "$exe" >"/tmp/$pkg.log" 2>&1 &
   pid=$!
-  trap 'kill $pid 2>/dev/null || true' RETURN
+  trap 'kill -- -$pid 2>/dev/null || true' RETURN
   # Wait for DDS discovery: echoing before the publisher is seen fails with
   # "Could not determine the type for the passed topic".
   local waited=0
@@ -75,9 +78,26 @@ smoke() {  # smoke <package> <executable> <system> <param>
   done
   timeout 30 ros2 topic echo --once "/$sys/joint_states" | head -20
   timeout 30 ros2 service call "/$sys/reset" std_srvs/srv/Trigger | tail -2
+  local nodes
+  nodes="$(ros2 node list 2>/dev/null | grep -cx "/${sys}_node" || true)"
+  if [ "$nodes" != "1" ]; then
+    echo "expected exactly one /${sys}_node, found $nodes"; ros2 node list; return 1
+  fi
   timeout 30 ros2 param set "/${sys}_node" "$param" 3.7
-  [ "$(timeout 30 ros2 param get "/${sys}_node" "$param")" = "Double value is: 3.7" ]
-  kill "$pid"; wait "$pid" 2>/dev/null || true
+  local got
+  got="$(timeout 30 ros2 param get "/${sys}_node" "$param" 2>&1 || true)"
+  echo "$got"
+  if ! printf '%s' "$got" | grep -q "Double value is: 3.7"; then
+    echo "live parameter update did not take effect"; cat "/tmp/$pkg.log"; return 1
+  fi
+  kill -- -"$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  # Do not start the next node until this one has left the ROS graph.
+  local gone=0
+  while ros2 node list 2>/dev/null | grep -qx "/${sys}_node"; do
+    sleep 1; gone=$((gone + 1))
+    if [ "$gone" -ge 20 ]; then echo "/${sys}_node did not shut down"; return 1; fi
+  done
   echo "node log:"; cat "/tmp/$pkg.log"
   echo "::endgroup::"
 }
