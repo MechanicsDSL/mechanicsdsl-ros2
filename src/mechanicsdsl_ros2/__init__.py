@@ -14,5 +14,21 @@ Quick start:
 
 from mechanicsdsl_ros2._version import __version__
 from mechanicsdsl_ros2._packages import list_packages, get_package_path
+from mechanicsdsl_ros2._bridge import (
+    CompiledSystem,
+    CoreNotInstalled,
+    DSLCompileError,
+    compile_spec,
+)
+from mechanicsdsl_ros2._scaffold import scaffold_package
 
-__all__ = ["__version__", "list_packages", "get_package_path"]
+__all__ = [
+    "__version__",
+    "list_packages",
+    "get_package_path",
+    "compile_spec",
+    "scaffold_package",
+    "CompiledSystem",
+    "CoreNotInstalled",
+    "DSLCompileError",
+]
