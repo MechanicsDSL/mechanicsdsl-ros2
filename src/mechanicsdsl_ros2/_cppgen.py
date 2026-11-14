@@ -1,29 +1,39 @@
 """
 _cppgen.py
 ----------
-Generic N-DOF C++ dynamics emitter.
+Generic N-DOF C++17 dynamics emitter.
 
 Turns a :class:`CompiledSystem` (compiled from DSL by ``mechanicsdsl-core``)
-into a self-contained, dependency-free C++ header implementing:
+into a self-contained, dependency-free C++ header implementing, inside
+``namespace mechanicsdsl``:
 
 * a ``<System>Params`` struct of physical parameters,
-* an acceleration function ``accel(q, qd, p, qdd)`` for arbitrary DOF,
-* a first-order ``deriv(y, p, dydt)`` over the ``2*N`` state vector, and
-* a fixed-step RK4 integrator ``rk4_step(y, dt, p)``.
+* ``initial_state(y, p)`` with the DSL initial conditions,
+* ``accel(q, qd, p, qdd)`` printed from the symbolic EOM with common
+  subexpression elimination,
+* ``deriv(y, p, dydt)`` and a fixed-step ``rk4_step(y, dt, p)``,
+* ``energy(y, p)`` (the Jacobi energy integral) when a Lagrangian exists.
 
-The equations of motion are printed straight from SymPy with
-``sympy.printing.cxx.cxxcode`` (``std::sin``, ``std::pow`` …), so the C++ is a
-faithful transcription of the symbolic dynamics — not a hand-written stub.
+Functions are overloaded on the ``Params`` type, so headers for several
+systems can be included in one translation unit. Internal identifiers carry
+an ``mdsl_`` prefix so a coordinate named ``y`` or a parameter named ``p``
+cannot collide with them.
+
+The equations are printed with SymPy's C++17 printer (``std::sin``,
+``std::pow`` ...): a faithful transcription of the symbolic dynamics.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
-from sympy.printing.cxx import cxxcode
+import sympy as sp
+from sympy.printing.cxx import CXX17CodePrinter
 
 if TYPE_CHECKING:
     from ._bridge import CompiledSystem
+
+GENERATOR = "mechanicsdsl-ros2"
 
 
 def _pascal(name: str) -> str:
@@ -34,42 +44,84 @@ def params_struct_name(system: "CompiledSystem") -> str:
     return f"{_pascal(system.name)}Params"
 
 
-def render_dynamics_header(system: "CompiledSystem", guard: str) -> str:
-    """Render a standalone C++ header for the system's dynamics."""
-    coords = system.coordinates
-    n = len(coords)
+def _bind(system: "CompiledSystem", used: set, q: str, qd: str) -> List[str]:
+    out = []
+    for i, c in enumerate(system.coordinates):
+        if c in used:
+            out.append(f"    const double {c} = {q}[{i}];")
+        if f"{c}_dot" in used:
+            out.append(f"    const double {c}_dot = {qd}[{i}];")
+    for p in sorted(system.parameters):
+        if p in used:
+            out.append(f"    const double {p} = mdsl_p.{p};")
+    return out
+
+
+def _cse(exprs, printer, prefix):
+    temps, reduced = sp.cse(exprs, symbols=sp.numbered_symbols(prefix))
+    return ([f"    const double {s} = {printer.doprint(v)};" for s, v in temps],
+            [printer.doprint(e) for e in reduced])
+
+
+def render_dynamics_header(system: "CompiledSystem", guard: str,
+                           generator: str = GENERATOR) -> str:
+    """Render a standalone C++17 header for the system's dynamics."""
+    pr = CXX17CodePrinter()
+    n, D = system.dof, system.state_dim
     struct = params_struct_name(system)
-    params = system.parameters
+    params = sorted(system.parameters)
+    up = system.name.upper()
 
-    # Parameter struct fields, in a stable order.
-    param_names = sorted(params)
     struct_fields = "\n".join(
-        f"    double {p} = {float(params[p])!r};" for p in param_names
+        f"    double {p} = {float(system.parameters[p])!r};"
+        + (f"  // {system.units[p]}" if system.units.get(p) else "")
+        for p in params
+    ) or "    double mdsl_unused = 0.0;"
+
+    exprs = [system.equations[f"{c}_ddot"] for c in system.coordinates]
+    used = set().union(*[{str(s) for s in e.free_symbols} for e in exprs])
+    temps, accel = _cse(exprs, pr, "mdsl_t")
+    voids = []
+    if not any(c in used for c in system.coordinates):
+        voids.append("    (void)mdsl_q;")
+    if not any(f"{c}_dot" in used for c in system.coordinates):
+        voids.append("    (void)mdsl_qd;")
+    if not any(p in used for p in params):
+        voids.append("    (void)mdsl_p;")
+    accel_body = "\n".join(
+        _bind(system, used, "mdsl_q", "mdsl_qd") + voids + temps
+        + [f"    mdsl_qdd[{i}] = {a};" for i, a in enumerate(accel)]
     )
 
-    # Unpack helpers used inside accel(): coordinate locals + params locals so
-    # the cxxcode-printed expressions (which reference `theta`, `theta_dot`,
-    # `g`, ...) compile verbatim.
-    coord_locals = "\n".join(
-        f"    const double {c} = q[{i}];\n"
-        f"    const double {c}_dot = qd[{i}];"
-        for i, c in enumerate(coords)
+    init = "\n".join(
+        f"    mdsl_y[{i}] = {v!r};  // {s}"
+        for i, (s, v) in enumerate(zip(system.state_names, system.initial_state()))
     )
-    param_locals = "\n".join(f"    const double {p} = p.{p};" for p in param_names)
 
-    accel_lines = []
-    for i, c in enumerate(coords):
-        expr = system.equations[f"{c}_ddot"]
-        accel_lines.append(f"    qdd[{i}] = {cxxcode(expr, standard='c++17')};")
-    accel_body = "\n".join(accel_lines)
+    energy_fn = ""
+    if system.energy is not None:
+        e_used = {str(s) for s in system.energy.free_symbols}
+        e_temps, (e_expr,) = _cse([system.energy], pr, "mdsl_e")
+        e_lines = _bind(system, e_used, "mdsl_y", f"(mdsl_y + {n})")
+        if not any(p in e_used for p in params):
+            e_lines.append("    (void)mdsl_p;")
+        if not any(c in e_used or f"{c}_dot" in e_used for c in system.coordinates):
+            e_lines.append("    (void)mdsl_y;")
+        energy_fn = f"""
+// Jacobi energy E = sum(qdot * dL/dqdot) - L. Conserved for conservative
+// systems, so its drift measures integration error.
+inline double energy(const double* mdsl_y, const {struct}& mdsl_p) {{
+{chr(10).join(e_lines + e_temps)}
+    return {e_expr};
+}}
+"""
 
     src_comment = "\n".join(f"//     {line}" for line in system.source.splitlines())
-
     return f"""\
-// Auto-generated by mechanicsdsl-ros2. DO NOT EDIT BY HAND.
+// Auto-generated by {generator}. DO NOT EDIT BY HAND.
 //
 // Equations of motion derived from the following DSL specification by
-// mechanicsdsl-core and transcribed to C++17 via SymPy cxxcode:
+// mechanicsdsl-core and transcribed to C++17 via SymPy:
 //
 {src_comment}
 //
@@ -86,43 +138,46 @@ struct {struct} {{
 {struct_fields}
 }};
 
-constexpr std::size_t {system.name.upper()}_DOF = {n};
-constexpr std::size_t {system.name.upper()}_STATE_DIM = {2 * n};
+constexpr std::size_t {up}_DOF = {n};
+constexpr std::size_t {up}_STATE_DIM = {D};
+constexpr bool {up}_HAS_ENERGY = {"true" if system.energy is not None else "false"};
+
+// Initial state from the DSL spec; layout [{", ".join(system.state_names)}].
+inline void initial_state(double* mdsl_y, const {struct}& /*mdsl_p*/) {{
+{init}
+}}
 
 // Generalized accelerations qdd from positions q and velocities qd.
-inline void accel(const double* q, const double* qd,
-                  const {struct}& p, double* qdd) {{
-{coord_locals}
-{param_locals}
+inline void accel(const double* mdsl_q, const double* mdsl_qd,
+                  const {struct}& mdsl_p, double* mdsl_qdd) {{
 {accel_body}
 }}
 
-// First-order form: y = [q0..q{n-1}, qd0..qd{n-1}], dydt has the same layout.
-inline void deriv(const double* y, const {struct}& p, double* dydt) {{
-    const std::size_t N = {n};
-    double qdd[{n}];
-    accel(y, y + N, p, qdd);
-    for (std::size_t i = 0; i < N; ++i) {{
-        dydt[i] = y[N + i];
-        dydt[N + i] = qdd[i];
+// First-order form: y = [q0..q{n - 1}, qd0..qd{n - 1}], dydt has the same layout.
+inline void deriv(const double* mdsl_y, const {struct}& mdsl_p, double* mdsl_dydt) {{
+    double mdsl_qdd[{n}];
+    accel(mdsl_y, mdsl_y + {n}, mdsl_p, mdsl_qdd);
+    for (std::size_t mdsl_i = 0; mdsl_i < {n}; ++mdsl_i) {{
+        mdsl_dydt[mdsl_i] = mdsl_y[{n} + mdsl_i];
+        mdsl_dydt[{n} + mdsl_i] = mdsl_qdd[mdsl_i];
     }}
 }}
 
-// Classic fixed-step RK4 integrator over the full state vector.
-inline void rk4_step(double* y, double dt, const {struct}& p) {{
-    const std::size_t D = {2 * n};
-    double k1[{2 * n}], k2[{2 * n}], k3[{2 * n}], k4[{2 * n}], tmp[{2 * n}];
-    deriv(y, p, k1);
-    for (std::size_t i = 0; i < D; ++i) tmp[i] = y[i] + 0.5 * dt * k1[i];
-    deriv(tmp, p, k2);
-    for (std::size_t i = 0; i < D; ++i) tmp[i] = y[i] + 0.5 * dt * k2[i];
-    deriv(tmp, p, k3);
-    for (std::size_t i = 0; i < D; ++i) tmp[i] = y[i] + dt * k3[i];
-    deriv(tmp, p, k4);
-    for (std::size_t i = 0; i < D; ++i)
-        y[i] += (dt / 6.0) * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+// Classic fixed-step RK4 integrator over the full state vector, in place.
+inline void rk4_step(double* mdsl_y, double mdsl_dt, const {struct}& mdsl_p) {{
+    double mdsl_k1[{D}], mdsl_k2[{D}], mdsl_k3[{D}], mdsl_k4[{D}], mdsl_tmp[{D}];
+    deriv(mdsl_y, mdsl_p, mdsl_k1);
+    for (std::size_t i = 0; i < {D}; ++i) mdsl_tmp[i] = mdsl_y[i] + 0.5 * mdsl_dt * mdsl_k1[i];
+    deriv(mdsl_tmp, mdsl_p, mdsl_k2);
+    for (std::size_t i = 0; i < {D}; ++i) mdsl_tmp[i] = mdsl_y[i] + 0.5 * mdsl_dt * mdsl_k2[i];
+    deriv(mdsl_tmp, mdsl_p, mdsl_k3);
+    for (std::size_t i = 0; i < {D}; ++i) mdsl_tmp[i] = mdsl_y[i] + mdsl_dt * mdsl_k3[i];
+    deriv(mdsl_tmp, mdsl_p, mdsl_k4);
+    for (std::size_t i = 0; i < {D}; ++i)
+        mdsl_y[i] += (mdsl_dt / 6.0)
+            * (mdsl_k1[i] + 2.0 * mdsl_k2[i] + 2.0 * mdsl_k3[i] + mdsl_k4[i]);
 }}
-
+{energy_fn}
 }}  // namespace mechanicsdsl
 
 #endif  // {guard}

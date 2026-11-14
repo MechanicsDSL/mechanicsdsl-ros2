@@ -43,7 +43,7 @@ def get_package_path(name: str) -> Optional[Path]:
     bundled = pkg_dir / "packages" / name
     if bundled.exists():
         return bundled
-    repo_root = pkg_dir.parent.parent.parent.parent
+    repo_root = pkg_dir.parent.parent
     local = repo_root / name
     if local.exists():
         return local

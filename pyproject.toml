@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mechanicsdsl-ros2"
-version = "0.1.0"
+dynamic = ["version"]
 description = "ROS2 integration and package scaffolding for MechanicsDSL — compile physical systems to complete ROS2 packages"
 readme = "README.md"
 license = { text = "MIT" }
@@ -26,11 +26,11 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-  "mechanicsdsl-core",
+  "mechanicsdsl-core>=2.1.4",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff"]
+dev = ["pytest>=7.0", "pytest-cov", "ruff"]
 
 [project.scripts]
 mechanicsdsl-ros2 = "mechanicsdsl_ros2.cli:main"
@@ -39,6 +39,9 @@ mechanicsdsl-ros2 = "mechanicsdsl_ros2.cli:main"
 Homepage = "https://github.com/MechanicsDSL/mechanicsdsl-ros2"
 Repository = "https://github.com/MechanicsDSL/mechanicsdsl-ros2"
 DOI = "https://doi.org/10.5281/zenodo.17771040"
+
+[tool.hatch.version]
+path = "src/mechanicsdsl_ros2/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mechanicsdsl_ros2"]

@@ -117,6 +117,49 @@ GTests cover EOM correctness, energy conservation, equilibrium stability, and sm
 
 ---
 
+## Generate a package from any DSL spec
+
+```bash
+pip install mechanicsdsl-ros2
+mechanicsdsl-ros2 scaffold double_pendulum -o ~/ros2_ws/src                 # ament_cmake + rclcpp
+mechanicsdsl-ros2 scaffold double_pendulum --lang python -o ~/ros2_ws/src   # ament_python + rclpy
+mechanicsdsl-ros2 scaffold my_system.msl --rate 500 -o ~/ros2_ws/src
+mechanicsdsl-ros2 header double_pendulum -o include/                        # header-only C++17 dynamics
+mechanicsdsl-ros2 inspect double_pendulum
+```
+
+Then:
+
+```bash
+cd ~/ros2_ws && colcon build --packages-select mechanicsdsl_double_pendulum
+ros2 launch mechanicsdsl_double_pendulum double_pendulum.launch.py
+```
+
+Every generated node:
+
+| Interface | Name | Type |
+|-----------|------|------|
+| state (C++ only) | `<system>/state` | `SystemState`: names, q, q_dot, q_ddot, energy, energy_drift, sim_time |
+| joint states | `<system>/joint_states` | `sensor_msgs/JointState` (RViz / robot_state_publisher ready) |
+| energy (Python only) | `<system>/energy` | `std_msgs/Float64` |
+| reset | `<system>/reset` | `std_srvs/Trigger` |
+| parameters | every physical parameter, `rate_hz`, `substeps`, `paused` | live-updatable with `ros2 param set` |
+
+The launch file loads `config/<system>_params.yaml` (keyed `/**`, so it
+applies under any node name or namespace). C++ packages include a gtest that
+checks the dynamics stay finite and, for conservative systems, conserve energy.
+
+### How generated code is checked
+
+The dynamics headers for six presets are compiled together in one
+translation unit with `g++ -std=c++17 -Wall -Wextra -Wpedantic -Werror` and
+compared with a Python RK4 reference to 1e-12. The Python package's
+`dynamics.py` is imported and run against the same reference. The rclcpp and
+rclpy nodes themselves are not built in this repository's CI (that needs a
+ROS2 install); build them with `colcon` as above.
+
+---
+
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the full node/message/layer diagram.
