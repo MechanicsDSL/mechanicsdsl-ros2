@@ -17,23 +17,26 @@ export MECHANICSDSL_NO_BANNER=1
 echo "::group::apt dependencies"
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-  python3-pip python3-colcon-common-extensions \
+  python3-venv python3-colcon-common-extensions \
   "ros-${ROS_DISTRO}-ament-cmake-gtest" "ros-${ROS_DISTRO}-std-srvs" \
   "ros-${ROS_DISTRO}-sensor-msgs" "ros-${ROS_DISTRO}-launch-ros" >/dev/null
 echo "::endgroup::"
 
+# The generator lives in its own venv: pip must not touch the distro's Python
+# packages (on Ubuntu 24.04 / jazzy it cannot uninstall Debian's numpy). The
+# generated nodes themselves run on the system Python with ROS's rclpy.
 echo "::group::install mechanicsdsl-ros2"
-PIP_FLAGS=""
-if python3 -m pip install --help | grep -q -- "--break-system-packages"; then
-  PIP_FLAGS="--break-system-packages"  # Ubuntu 24.04 (jazzy) marks system Python as managed
-fi
-python3 -m pip install -q $PIP_FLAGS "$REPO"
+GEN_VENV=/tmp/mdsl_gen_venv
+python3 -m venv "$GEN_VENV"
+"$GEN_VENV/bin/python" -m pip install -q --upgrade pip
+"$GEN_VENV/bin/python" -m pip install -q "$REPO"
+GEN="$GEN_VENV/bin/mechanicsdsl-ros2"
 echo "::endgroup::"
 
 rm -rf "$WS" && mkdir -p "$WS/src"
 for s in $SYSTEMS; do
-  mechanicsdsl-ros2 scaffold "$s" --lang cpp -o "$WS/src"
-  mechanicsdsl-ros2 scaffold "$s" --lang python -o "$WS/src"
+  "$GEN" scaffold "$s" --lang cpp -o "$WS/src"
+  "$GEN" scaffold "$s" --lang python -o "$WS/src"
 done
 
 # ROS setup scripts reference unset variables; relax -u while sourcing.
@@ -80,7 +83,7 @@ smoke() {  # smoke <package> <executable> <system> <param>
 }
 
 for s in $SYSTEMS; do
-  name="$(python3 -c "import mechanicsdsl_ros2 as m; print(m.compile_spec('$s').name)")"
+  name="$("$GEN_VENV/bin/python" -c "import mechanicsdsl_ros2 as m; print(m.compile_spec('$s').name)" 2>/dev/null | tail -1)"
   smoke "mechanicsdsl_${name}" "${name}_node" "$name" g
   smoke "mechanicsdsl_${name}_py" "${name}_node" "$name" g
 done
