@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ['3.9', '3.10', '3.11', '3.12']
+        python-version: ['3.10', '3.11', '3.12', '3.13']
         include:
           - os: windows-latest
             python-version: '3.12'
@@ -23,8 +23,8 @@ jobs:
     env:
       MECHANICSDSL_NO_BANNER: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -38,12 +38,25 @@ jobs:
       - name: Test
         run: pytest -v --cov=src --cov-report=term-missing
 
+  colcon:
+    name: colcon build of generated packages (ROS2 ${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    container: ros:${{ matrix.distro }}
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Generate, build, test and smoke-run C++ and Python packages
+        run: bash scripts/ci_colcon.sh
+
   build:
     name: Build sdist and wheel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: pip install build twine
